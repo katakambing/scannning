@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>UniKL Pro Scanner</title>
-    <!-- Import jsQR library for decoding -->
     <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
     <style>
         body {
@@ -20,14 +19,7 @@
             overflow: hidden;
         }
         h2 { margin-bottom: 5px; }
-        .instructions {
-            font-size: 0.85rem;
-            color: #aaaaaa;
-            margin-bottom: 10px;
-            text-align: center;
-        }
         
-        /* The canvas acts as our "zoomed" viewport */
         canvas {
             border: 3px solid #00ff00;
             border-radius: 12px;
@@ -37,7 +29,6 @@
             margin-top: 5px;
         }
         
-        /* Slider styling */
         .controls {
             margin-top: 15px;
             display: flex;
@@ -48,10 +39,7 @@
             padding: 15px;
             border-radius: 10px;
         }
-        input[type=range] {
-            width: 100%;
-            margin-top: 10px;
-        }
+        input[type=range] { width: 100%; margin-top: 10px; }
         
         #status {
             margin-top: 15px;
@@ -62,28 +50,71 @@
             border-radius: 8px;
             background: #1a1a1a;
             width: 80%;
+        }
+
+        /* NEW: The Output Card that shows up after scanning */
+        #outputCard {
+            display: none; /* Hidden until we catch something */
+            background: #1e1e1e;
+            border: 2px solid #00ff00;
+            padding: 20px;
+            border-radius: 12px;
+            width: 85%;
+            margin-top: 15px;
+            box-shadow: 0 0 15px rgba(0, 255, 0, 0.3);
             word-wrap: break-word;
         }
+        #outputCard h3 { color: #00ff00; margin-top: 0; text-align: center; }
+        .data-label { color: #aaaaaa; font-size: 0.9rem; }
+        .data-value { font-size: 1.2rem; font-weight: bold; margin-bottom: 10px; }
+        #rawJsonBox {
+            background: #000;
+            padding: 10px;
+            border-radius: 5px;
+            color: #00ff00;
+            font-family: monospace;
+            font-size: 0.85rem;
+            margin-bottom: 15px;
+        }
+        .submit-btn {
+            width: 100%;
+            padding: 15px;
+            background: #00ff00;
+            color: #000;
+            border: none;
+            border-radius: 8px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .submit-btn:active { background: #00cc00; }
     </style>
 </head>
 <body>
 
     <h2>UniKL Pro Scanner 🔎</h2>
-    <div class="instructions">Log into ECitizen first.</div>
     
-    <!-- Hidden video element to grab the raw camera feed -->
     <video id="video" playsinline hidden></video>
-    
-    <!-- Canvas to display the digitally zoomed crop -->
     <canvas id="canvas" width="300" height="300"></canvas>
     
-    <!-- Zoom Slider -->
-    <div class="controls">
+    <div class="controls" id="zoomControls">
         <label for="zoomSlider">Zoom Level: <span id="zoomValue">2.0</span>x</label>
         <input type="range" id="zoomSlider" min="1.0" max="6.0" step="0.1" value="2.0">
     </div>
     
     <div id="status">Requesting camera...</div>
+
+    <!-- NEW: The Output Data Card -->
+    <div id="outputCard">
+        <h3>Data Captured!</h3>
+        <div class="data-label">Session ID:</div>
+        <div class="data-value" id="outSession">---</div>
+        
+        <div class="data-label">Raw Payload:</div>
+        <div id="rawJsonBox"></div>
+        
+        <button class="submit-btn" id="proceedBtn">Proceed to ECitizen</button>
+    </div>
 
     <script>
         const video = document.getElementById("video");
@@ -93,98 +124,88 @@
         const zoomSlider = document.getElementById("zoomSlider");
         const zoomValue = document.getElementById("zoomValue");
         
+        // UI Elements for the output
+        const outputCard = document.getElementById("outputCard");
+        const zoomControls = document.getElementById("zoomControls");
+        const outSession = document.getElementById("outSession");
+        const rawJsonBox = document.getElementById("rawJsonBox");
+        const proceedBtn = document.getElementById("proceedBtn");
+        
         let scanning = true;
 
-        // Update zoom text when slider moves
         zoomSlider.addEventListener('input', function() {
             zoomValue.innerText = this.value;
         });
 
-        // Request access to the rear camera
         navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
             .then(function(stream) {
                 video.srcObject = stream;
-                video.setAttribute("playsinline", true); // Required for iOS Safari
+                video.setAttribute("playsinline", true);
                 video.play();
                 statusDiv.innerText = "Scanning for QR...";
                 requestAnimationFrame(tick);
             })
             .catch(function(err) {
                 statusDiv.style.color = "#ff4444";
-                statusDiv.innerText = "Camera access denied. Check phone settings.";
-                console.error("Camera error:", err);
+                statusDiv.innerText = "Camera access denied.";
             });
 
         function tick() {
             if (video.readyState === video.HAVE_ENOUGH_DATA && scanning) {
                 
-                // Get the LIVE zoom factor from your slider
                 const currentZoom = parseFloat(zoomSlider.value);
-                
-                // Calculate the crop area based on the slider's zoom factor
                 const cropWidth = video.videoWidth / currentZoom;
                 const cropHeight = video.videoHeight / currentZoom;
-                
-                // Center the crop
                 const startX = (video.videoWidth - cropWidth) / 2;
                 const startY = (video.videoHeight - cropHeight) / 2;
 
-                // Draw the zoomed video onto the canvas
                 ctx.drawImage(video, startX, startY, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height);
 
-                // Scan the canvas
                 const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                const code = jsQR(imageData.data, imageData.width, imageData.height, {
-                    inversionAttempts: "dontInvert",
-                });
+                const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: "dontInvert" });
 
                 if (code) {
                     try {
-                        // 1. TRY TO PARSE AS UNIKL JSON
                         const qrPayload = JSON.parse(code.data);
                         
-                        if (qrPayload.session && qrPayload.attendanceType) {
-                            scanning = false; // Stop scanning
-                            canvas.style.borderColor = "#00ff00";
-                            statusDiv.style.color = "#00ff00";
-                            statusDiv.innerText = "Extracted Session: " + qrPayload.session + "\nRedirecting...";
+                        if (qrPayload.session) {
+                            scanning = false; // Stop the camera loop
                             
-                            // Construct the URL using the session ID
+                            // 1. Hide the camera UI
+                            canvas.style.display = "none";
+                            zoomControls.style.display = "none";
+                            statusDiv.style.display = "none";
+                            
+                            // 2. Show the Output Card and fill in the data
+                            outputCard.style.display = "block";
+                            outSession.innerText = qrPayload.session;
+                            rawJsonBox.innerText = JSON.stringify(qrPayload, null, 2); // Pretty-print the JSON
+                            
+                            // 3. Set up the Proceed Button
                             const targetUrl = "https://ecitizen.unikl.edu.my/attendance?session=" + qrPayload.session;
-                            
-                            setTimeout(() => {
+                            proceedBtn.onclick = function() {
                                 window.location.href = targetUrl;
-                            }, 1500);
-                        } else {
-                            statusDiv.style.color = "#ffaa00";
-                            statusDiv.innerText = "Ignored: JSON found, but no UniKL session ID.";
+                            };
                         }
-                        
                     } catch (e) {
-                        // 2. FALLBACK: IF IT'S A NORMAL LINK INSTEAD OF JSON
                         if (code.data.includes("unikl.edu.my")) {
-                            scanning = false; // Stop scanning
-                            canvas.style.borderColor = "#00ff00";
-                            statusDiv.style.color = "#00ff00";
-                            statusDiv.innerText = "Success! Redirecting...";
+                            scanning = false;
                             
-                            setTimeout(() => {
+                            canvas.style.display = "none";
+                            zoomControls.style.display = "none";
+                            statusDiv.style.display = "none";
+                            
+                            outputCard.style.display = "block";
+                            outSession.innerText = "N/A (Standard Web Link)";
+                            rawJsonBox.innerText = code.data;
+                            
+                            proceedBtn.onclick = function() {
                                 window.location.href = code.data;
-                            }, 1000);
-                        } else {
-                            // It's a completely random QR code (like a restaurant menu)
-                            statusDiv.style.color = "#ffaa00";
-                            statusDiv.innerText = "Ignored: Not a UniKL QR Code.";
+                            };
                         }
                     }
-                } else {
-                    // Reset text when looking for a code
-                    statusDiv.style.color = "#ffffff";
-                    statusDiv.innerText = "Scanning for QR...";
                 }
             }
-            
-            // Keep looping
             if (scanning) {
                 requestAnimationFrame(tick);
             }
