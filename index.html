@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>UniKL Zoom Scanner</title>
+    <!-- Import jsQR library for decoding -->
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            background-color: #121212;
+            color: #ffffff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        h2 {
+            margin-bottom: 10px;
+        }
+        .instructions {
+            font-size: 0.9rem;
+            color: #aaaaaa;
+            margin-bottom: 20px;
+            text-align: center;
+            padding: 0 15px;
+        }
+        /* The canvas acts as our "zoomed" viewport */
+        canvas {
+            border: 3px solid #00ff00;
+            border-radius: 12px;
+            max-width: 90%;
+            background-color: #000;
+            box-shadow: 0 0 20px rgba(0, 255, 0, 0.2);
+        }
+        #status {
+            margin-top: 25px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            text-align: center;
+            word-wrap: break-word;
+            padding: 10px 20px;
+            border-radius: 8px;
+            background: #222;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>UniKL Scanner 🔎</h2>
+    <div class="instructions">Point at the screen. Make sure you are logged into ECitizen.</div>
+    
+    <!-- Hidden video element to grab the raw camera feed -->
+    <video id="video" playsinline hidden></video>
+    
+    <!-- Canvas to display the digitally zoomed crop -->
+    <canvas id="canvas" width="300" height="300"></canvas>
+    
+    <div id="status">Requesting camera...</div>
+
+    <script>
+        const video = document.getElementById("video");
+        const canvas = document.getElementById("canvas");
+        const ctx = canvas.getContext("2d");
+        const statusDiv = document.getElementById("status");
+        
+        let scanning = true;
+
+        // --- ZOOM CONTROL ---
+        // Increase this number to zoom in more (e.g., 2.5 or 3.0)
+        // Decrease it to zoom out (e.g., 1.5)
+        const ZOOM_FACTOR = 2.0; 
+
+        // Request access to the rear camera
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+            .then(function(stream) {
+                video.srcObject = stream;
+                video.setAttribute("playsinline", true); // Required for iOS Safari
+                video.play();
+                statusDiv.innerText = "Scanning for UniKL QR...";
+                requestAnimationFrame(tick);
+            })
+            .catch(function(err) {
+                statusDiv.style.color = "#ff4444";
+                statusDiv.innerText = "Camera access denied or unavailable.";
+                console.error("Camera error:", err);
+            });
+
+        function tick() {
+            if (video.readyState === video.HAVE_ENOUGH_DATA && scanning) {
+                
+                // Calculate the crop area based on the zoom factor
+                const cropWidth = video.videoWidth / ZOOM_FACTOR;
+                const cropHeight = video.videoHeight / ZOOM_FACTOR;
+                
+                // Center the crop
+                const startX = (video.videoWidth - cropWidth) / 2;
+                const startY = (video.videoHeight - cropHeight) / 2;
+
+                // Draw the cropped (zoomed) center of the video onto the canvas
+                ctx.drawImage(video, startX, startY, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height);
+
+                // Grab the image data from the canvas to scan it
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                    inversionAttempts: "dontInvert",
+                });
+
+                if (code) {
+                    // Security Check: Only trigger on UniKL links
+                    if (code.data.includes("unikl.edu.my")) {
+                        scanning = false; // Stop scanning so it doesn't loop
+                        
+                        // Update UI
+                        canvas.style.borderColor = "#00ff00";
+                        statusDiv.style.color = "#00ff00";
+                        statusDiv.innerText = "Success! Redirecting...";
+                        
+                        // Redirect to the scanned attendance link after 1 second
+                        setTimeout(() => {
+                            window.location.href = code.data;
+                        }, 1000);
+                        
+                    } else {
+                        statusDiv.style.color = "#ffaa00";
+                        statusDiv.innerText = "Ignored: Not a UniKL link.";
+                    }
+                } else {
+                    // Reset status text if it briefly saw a non-UniKL code but lost it
+                    statusDiv.style.color = "#ffffff";
+                    statusDiv.innerText = "Scanning for UniKL QR...";
+                }
+            }
+            
+            // Keep looping the camera feed as long as we are still scanning
+            if (scanning) {
+                requestAnimationFrame(tick);
+            }
+        }
+    </script>
+</body>
+</html>
