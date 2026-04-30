@@ -19,16 +19,8 @@
             height: 100vh;
             overflow: hidden;
         }
-        h2 {
-            margin-bottom: 10px;
-        }
-        .instructions {
-            font-size: 0.9rem;
-            color: #aaaaaa;
-            margin-bottom: 20px;
-            text-align: center;
-            padding: 0 15px;
-        }
+        h2 { margin-bottom: 5px; }
+        
         /* The canvas acts as our "zoomed" viewport */
         canvas {
             border: 3px solid #00ff00;
@@ -36,29 +28,48 @@
             max-width: 90%;
             background-color: #000;
             box-shadow: 0 0 20px rgba(0, 255, 0, 0.2);
+            margin-top: 10px;
         }
+        
+        /* Slider styling */
+        .controls {
+            margin-top: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 80%;
+            background: #222;
+            padding: 15px;
+            border-radius: 10px;
+        }
+        input[type=range] {
+            width: 100%;
+            margin-top: 10px;
+        }
+        
         #status {
-            margin-top: 25px;
-            font-size: 1.2rem;
+            margin-top: 15px;
+            font-size: 1.1rem;
             font-weight: bold;
             text-align: center;
-            word-wrap: break-word;
-            padding: 10px 20px;
-            border-radius: 8px;
-            background: #222;
         }
     </style>
 </head>
 <body>
 
     <h2>UniKL Scanner 🔎</h2>
-    <div class="instructions">Point at the screen. Make sure you are logged into ECitizen.</div>
     
     <!-- Hidden video element to grab the raw camera feed -->
     <video id="video" playsinline hidden></video>
     
     <!-- Canvas to display the digitally zoomed crop -->
     <canvas id="canvas" width="300" height="300"></canvas>
+    
+    <!-- NEW: Zoom Slider -->
+    <div class="controls">
+        <label for="zoomSlider">Zoom Level: <span id="zoomValue">2.0</span>x</label>
+        <input type="range" id="zoomSlider" min="1.0" max="5.0" step="0.1" value="2.0">
+    </div>
     
     <div id="status">Requesting camera...</div>
 
@@ -67,13 +78,15 @@
         const canvas = document.getElementById("canvas");
         const ctx = canvas.getContext("2d");
         const statusDiv = document.getElementById("status");
+        const zoomSlider = document.getElementById("zoomSlider");
+        const zoomValue = document.getElementById("zoomValue");
         
         let scanning = true;
 
-        // --- ZOOM CONTROL ---
-        // Increase this number to zoom in more (e.g., 2.5 or 3.0)
-        // Decrease it to zoom out (e.g., 1.5)
-        const ZOOM_FACTOR = 2.0; 
+        // Update zoom text when slider moves
+        zoomSlider.addEventListener('input', function() {
+            zoomValue.innerText = this.value;
+        });
 
         // Request access to the rear camera
         navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
@@ -86,41 +99,41 @@
             })
             .catch(function(err) {
                 statusDiv.style.color = "#ff4444";
-                statusDiv.innerText = "Camera access denied or unavailable.";
+                statusDiv.innerText = "Camera access denied. Check phone settings.";
                 console.error("Camera error:", err);
             });
 
         function tick() {
             if (video.readyState === video.HAVE_ENOUGH_DATA && scanning) {
                 
-                // Calculate the crop area based on the zoom factor
-                const cropWidth = video.videoWidth / ZOOM_FACTOR;
-                const cropHeight = video.videoHeight / ZOOM_FACTOR;
+                // Get the LIVE zoom factor from your slider
+                const currentZoom = parseFloat(zoomSlider.value);
+                
+                // Calculate the crop area based on the slider's zoom factor
+                const cropWidth = video.videoWidth / currentZoom;
+                const cropHeight = video.videoHeight / currentZoom;
                 
                 // Center the crop
                 const startX = (video.videoWidth - cropWidth) / 2;
                 const startY = (video.videoHeight - cropHeight) / 2;
 
-                // Draw the cropped (zoomed) center of the video onto the canvas
+                // Draw the zoomed video onto the canvas
                 ctx.drawImage(video, startX, startY, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height);
 
-                // Grab the image data from the canvas to scan it
+                // Scan the canvas
                 const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                 const code = jsQR(imageData.data, imageData.width, imageData.height, {
                     inversionAttempts: "dontInvert",
                 });
 
                 if (code) {
-                    // Security Check: Only trigger on UniKL links
                     if (code.data.includes("unikl.edu.my")) {
-                        scanning = false; // Stop scanning so it doesn't loop
+                        scanning = false; // Stop scanning
                         
-                        // Update UI
                         canvas.style.borderColor = "#00ff00";
                         statusDiv.style.color = "#00ff00";
                         statusDiv.innerText = "Success! Redirecting...";
                         
-                        // Redirect to the scanned attendance link after 1 second
                         setTimeout(() => {
                             window.location.href = code.data;
                         }, 1000);
@@ -130,13 +143,11 @@
                         statusDiv.innerText = "Ignored: Not a UniKL link.";
                     }
                 } else {
-                    // Reset status text if it briefly saw a non-UniKL code but lost it
                     statusDiv.style.color = "#ffffff";
                     statusDiv.innerText = "Scanning for UniKL QR...";
                 }
             }
             
-            // Keep looping the camera feed as long as we are still scanning
             if (scanning) {
                 requestAnimationFrame(tick);
             }
